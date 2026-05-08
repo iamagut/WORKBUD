@@ -1,33 +1,32 @@
 """
 WorkBuddy Backend Module
-Handles all business logic: folder scanning, file organization, and database management
+Handles all business logic: folder scanning, rule-based file organization, 
+file quarantine, and database history management.
 
 This module contains:
 - Data models (FileRecord, ScanResult)
-- Database operations (HistoryDB)
-- Folder scanning (FolderScanner)
-- File organization (Organizer)
-- Utility functions for file handling
+- Database operations (HistoryDB) for auditing scans, moves, and quarantines
+- Folder scanning (FolderScanner) with cross-platform hidden file detection
+- File organization (Organizer) supporting category, date, and extension rules
+- Utility functions for size-formatting and path handling
 
 Key Design:
-- Separation of concerns: UI-independent business logic
+- Separation of concerns: strictly UI-independent business logic (no GUI dependencies)
 - Immutable data structures (frozen dataclasses) for thread safety
-- SQLite for persistent history and undo capability
+- SQLite for persistent operation history, saving metadata required for external undo actions
+- Safe file-handling mechanisms, including quarantine directory isolation
 """
 
 from __future__ import annotations
 
-import csv
-import hashlib
 import os
 import shutil
 import sqlite3
-import threading
-import time
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, Iterable, List, Optional, Tuple
+
 
 APP_TITLE = "Folder Analyzer + Auto Organizer"
 DB_FILENAME = "workbuddy_history.sqlite3"
@@ -587,3 +586,119 @@ class Organizer:
             if not candidate.exists():
                 return candidate
         return parent / f"{stem} (copy){suffix}"
+
+# ---------------------------------------------------------------------------
+# Analytics / Insights Helpers
+# Moved from gui.py to keep business logic UI-independent.
+# ---------------------------------------------------------------------------
+
+class ScanAnalyzer:
+    """Pure analysis helpers for ScanResult objects."""
+
+    @staticmethod
+    def group_counts(result: ScanResult, *, key: str) -> List[Tuple[str, int]]:
+        if not result.records:
+            return []
+
+        if key == "category":
+            items = [r.category for r in result.records]
+        elif key == "ext":
+            items = [r.ext or "" for r in result.records]
+        else:
+            raise ValueError("Unknown key")
+
+        counts: Dict[str, int] = {}
+        for it in items:
+            counts[it] = counts.get(it, 0) + 1
+
+        return sorted(counts.items(), key=lambda kv: (-kv[1], kv[0].lower()))
+
+    @staticmethod
+    def category_sizes(result: ScanResult) -> Dict[str, int]:
+        out: Dict[str, int] = {}
+        for r in result.records:
+            out[r.category] = out.get(r.category, 0) + int(r.size_bytes)
+        return out
+
+    @staticmethod
+    def largest_files(result: ScanResult, limit: int = 25) -> List[FileRecord]:
+        return sorted(result.records, key=lambda r: r.size_bytes, reverse=True)[:limit]
+
+    @staticmethod
+    def oldest_files(result: ScanResult, limit: int = 25) -> List[FileRecord]:
+        return sorted(result.records, key=lambda r: r.modified_iso)[:limit]
+
+    @staticmethod
+    def aggregate_current(result: ScanResult) -> Dict[str, Tuple[int, int]]:
+        out: Dict[str, Tuple[int, int]] = {}
+
+        for r in result.records:
+            cnt, sz = out.get(r.category, (0, 0))
+            out[r.category] = (cnt + 1, sz + int(r.size_bytes))
+
+        return out
+
+    @staticmethod
+    def aggregate_saved(saved_files: List[Tuple[str, str, str, int]]) -> Dict[str, Tuple[int, int]]:
+        out: Dict[str, Tuple[int, int]] = {}
+
+        for _rel, cat, _ext, size in saved_files:
+            cnt, sz = out.get(cat, (0, 0))
+            out[cat] = (cnt + 1, sz + int(size))
+
+        return out
+
+
+class FolderInsights:
+    """Filesystem insight helpers."""
+
+    @staticmethod
+    def find_empty_dirs(base: Path) -> List[Path]:
+        empty_dirs: List[Path] = []
+
+        try:
+            for p in base.rglob("*"):
+                if not p.is_dir():
+                    continue
+
+                try:
+                    if any(p.iterdir()):
+                        continue
+                    empty_dirs.append(p)
+                except Exception:
+                    continue
+        except Exception:
+            return []
+        return empty_dirs
+
+
+class FolderWatcher:
+    """Lightweight snapshot-based folder watcher support."""
+
+    @staticmethod
+    def snapshot(
+        folder: Path,
+        *,
+        recursive: bool,
+        include_hidden: bool,
+        scanner: FolderScanner,
+    ) -> Dict[str, float]:
+
+        out: Dict[str, float] = {}
+
+        iterator = folder.rglob("*") if recursive else folder.glob("*")
+
+        for p in iterator:
+            if p.is_dir():
+                continue
+
+            if not include_hidden and scanner._is_hidden(p):
+                continue
+
+            try:
+                st = p.stat()
+                out[safe_relpath(p, folder)] = float(st.st_mtime)
+            except Exception:
+                continue
+
+        return out
