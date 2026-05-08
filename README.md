@@ -1,29 +1,25 @@
 ## WorkBuddy (Python Tkinter)
 
-**WorkBuddy** là một công cụ desktop đơn giản giúp giải quyết vấn đề thường gặp hằng ngày: thư mục lộn xộn và mất thời gian tìm kiếm tệp.
+**WorkBuddy** là một công cụ desktop mạnh mẽ giúp giải quyết vấn đề quản lý tệp tin hàng ngày: thư mục lộn xộn và mất thời gian tìm kiếm dữ liệu.
 
-Ứng dụng có thể:
-
-- **Quét thư mục** và thống kê loại tệp + tổng dung lượng
-- **Hiển thị biểu đồ** (biểu đồ tròn theo nhóm + biểu đồ thanh các đuôi tệp phổ biến)
-- **Xuất kết quả ra CSV**
-- **Lưu lịch sử quét vào SQLite**
-- **Tự động sắp xếp tệp** vào các thư mục theo nhóm (Images, Documents, Code, ...)
-- **Advanced tools (ẩn trong Advanced dropdown)**:
-  - **Filter/Search** (lọc nhanh bảng theo tên/đường dẫn/đuôi/nhóm)
-  - **Find duplicates** (phát hiện tệp trùng theo size + SHA-256) + export CSV
-  - **Undo last organize** (hoàn tác lần sắp xếp gần nhất)
-  - **Compare scans** (so sánh scan hiện tại với 1 scan đã lưu trong SQLite) + export CSV
-  - **Insights / Cleanup** (top file lớn nhất, file cũ nhất, empty folders) + export CSV
-  - **Right-click menu** trên bảng: mở trong File Explorer, copy full path (double-click để mở nhanh)
+### Ứng dụng có thể:
+- **Quét thư mục**: Thống kê loại tệp, phần mở rộng và tổng dung lượng một cách chi tiết.
+- **Trực quan hoá dữ liệu**: Hiển thị biểu đồ tròn (theo nhóm) và biểu đồ thanh (theo đuôi tệp phổ biến) bằng Matplotlib.
+- **Xuất dữ liệu**: Hỗ trợ xuất kết quả ra tệp CSV hoặc lưu trữ lâu dài trong cơ sở dữ liệu SQLite.
+- **Tự động sắp xếp**: Phân loại tệp vào các thư mục theo nhóm như Images, Documents, Code, v.v..
+- **Công cụ nâng cao (Advanced Tools)**:
+  - **Lọc/Tìm kiếm**: Bộ lọc thời gian thực trong bảng danh sách tệp.
+  - **Tìm tệp trùng lặp**: Phát hiện dựa trên kích thước và mã băm SHA-256, hỗ trợ cách ly (quarantine) tệp trùng.
+  - **Hoàn tác (Undo)**: Đảo ngược các thao tác sắp xếp tệp gần nhất từ lịch sử.
+  - **So sánh lần quét**: So sánh trạng thái thư mục hiện tại với các bản lưu trong quá khứ.
+  - **Tự động hóa**: Chế độ theo dõi (Watch mode) để tự động cập nhật khi có thay đổi và lên lịch quét định kỳ.
 
 ### Công nghệ sử dụng
-
-- **Python**
-- **tkinter**: giao diện GUI
-- **pandas**: xử lý dữ liệu + xuất CSV
-- **matplotlib**: vẽ biểu đồ trong GUI
-- **sqlite3**: cơ sở dữ liệu lưu lịch sử quét
+- **Python**: Ngôn ngữ lập trình chính.
+- **tkinter**: Thư viện xây dựng giao diện người dùng (GUI).
+- **pandas**: Xử lý và phân tích dữ liệu tệp.
+- **matplotlib**: Vẽ biểu đồ thống kê.
+- **sqlite3**: Quản lý cơ sở dữ liệu lịch sử và hoàn tác.
 
 ### Cài đặt
 
