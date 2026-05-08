@@ -3,7 +3,7 @@ from tkinter import filedialog, messagebox, ttk
 from datetime import datetime
 import pandas as pd
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
-from matplotlib.figure import Figure
+from matplotlib.figure import Figure    
 import csv
 import os
 import subprocess
@@ -36,6 +36,8 @@ class WorkBuddyApp(tk.Tk):
         self._last_watch_snapshot: Dict[str, float] = {}
 
         self._build_ui()
+        # Watch mode depends on having at least one completed scan as a baseline.
+        self._set_watch_enabled(enabled=bool(self._latest_result))
         self._refresh_history()
 
     def _build_ui(self) -> None:
@@ -150,7 +152,13 @@ class WorkBuddyApp(tk.Tk):
         ttk.Button(auto, text="Apply schedule", command=self._apply_schedule).grid(row=0, column=3, padx=(10, 0), sticky="w")
 
         self.watch_var = tk.BooleanVar(value=False)
-        ttk.Checkbutton(auto, text="Watch mode (detect changes)", variable=self.watch_var, command=self._toggle_watch).grid(
+        self.watch_check = ttk.Checkbutton(
+            auto,
+            text="Watch mode (detect changes)",
+            variable=self.watch_var,
+            command=self._toggle_watch,
+        )
+        self.watch_check.grid(
             row=0, column=4, padx=(18, 0), sticky="w"
         )
         ttk.Label(auto, text="(lightweight polling)", foreground="#555").grid(row=0, column=5, padx=(6, 0), sticky="w")
@@ -269,6 +277,24 @@ class WorkBuddyApp(tk.Tk):
             self._start_watch()
         else:
             self._stop_watch()
+
+    def _set_watch_enabled(self, enabled: bool) -> None:
+        """
+        Enable Watch mode only after at least one scan has completed.
+        This prevents polling from auto-starting scans without any baseline UI/data yet.
+        """
+        if not hasattr(self, "watch_check"):
+            return
+
+        if not enabled:
+            # If Watch was already on, shut down background polling as we no longer have a scan baseline.
+            if self.watch_var.get():
+                self.watch_var.set(False)
+            self._stop_watch()
+            self.watch_check.configure(state="disabled")
+            return
+
+        self.watch_check.configure(state="normal")
 
     def _start_watch(self) -> None:
         self._stop_watch()
@@ -528,6 +554,7 @@ class WorkBuddyApp(tk.Tk):
 
     def _on_scan_error(self, message: str) -> None:
         self._set_busy(False, "Ready.")
+        self._set_watch_enabled(enabled=bool(self._latest_result))
         messagebox.showerror("Scan failed", message)
 
     def _on_scan_complete(self, result: ScanResult, elapsed: float) -> None:
@@ -535,6 +562,7 @@ class WorkBuddyApp(tk.Tk):
         self._latest_scan_id = None
         self._current_filter = (self.filter_var.get() or "").strip()
 
+        self._set_watch_enabled(enabled=True)
         self._populate_table(result)
         self._render_charts(result)
         self._update_summary(result, elapsed)
