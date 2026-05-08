@@ -18,7 +18,7 @@ class WorkBuddyApp(tk.Tk):
     def __init__(self) -> None:
         super().__init__()
         self.title(APP_TITLE)
-        self.geometry("1100x700")
+        self.geometry("1320x750")
         self.minsize(1000, 650)
 
         self._scanner = FolderScanner()
