@@ -29,10 +29,6 @@ from datetime import datetime
 from pathlib import Path
 from typing import Dict, Iterable, List, Optional, Tuple
 
-import pandas as pd
-from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
-from matplotlib.figure import Figure
-
 APP_TITLE = "Folder Analyzer + Auto Organizer"
 DB_FILENAME = "workbuddy_history.sqlite3"
 QUARANTINE_DIRNAME = ".workbuddy_quarantine"
