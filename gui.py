@@ -3,7 +3,7 @@ from tkinter import filedialog, messagebox, ttk
 from datetime import datetime
 import pandas as pd
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
-from matplotlib.figure import Figure    
+from matplotlib.figure import Figure
 import csv
 import os
 import subprocess
@@ -12,13 +12,14 @@ import time
 import hashlib
 
 from backend import *
+from backend import ScanAnalyzer, FolderInsights, FolderWatcher
 
 
 class WorkBuddyApp(tk.Tk):
     def __init__(self) -> None:
         super().__init__()
         self.title(APP_TITLE)
-        self.geometry("1320x750")
+        self.geometry("1100x700")
         self.minsize(1000, 650)
 
         self._scanner = FolderScanner()
@@ -36,8 +37,6 @@ class WorkBuddyApp(tk.Tk):
         self._last_watch_snapshot: Dict[str, float] = {}
 
         self._build_ui()
-        # Watch mode depends on having at least one completed scan as a baseline.
-        self._set_watch_enabled(enabled=bool(self._latest_result))
         self._refresh_history()
 
     def _build_ui(self) -> None:
@@ -152,13 +151,7 @@ class WorkBuddyApp(tk.Tk):
         ttk.Button(auto, text="Apply schedule", command=self._apply_schedule).grid(row=0, column=3, padx=(10, 0), sticky="w")
 
         self.watch_var = tk.BooleanVar(value=False)
-        self.watch_check = ttk.Checkbutton(
-            auto,
-            text="Watch mode (detect changes)",
-            variable=self.watch_var,
-            command=self._toggle_watch,
-        )
-        self.watch_check.grid(
+        ttk.Checkbutton(auto, text="Watch mode (detect changes)", variable=self.watch_var, command=self._toggle_watch).grid(
             row=0, column=4, padx=(18, 0), sticky="w"
         )
         ttk.Label(auto, text="(lightweight polling)", foreground="#555").grid(row=0, column=5, padx=(6, 0), sticky="w")
@@ -278,24 +271,6 @@ class WorkBuddyApp(tk.Tk):
         else:
             self._stop_watch()
 
-    def _set_watch_enabled(self, enabled: bool) -> None:
-        """
-        Enable Watch mode only after at least one scan has completed.
-        This prevents polling from auto-starting scans without any baseline UI/data yet.
-        """
-        if not hasattr(self, "watch_check"):
-            return
-
-        if not enabled:
-            # If Watch was already on, shut down background polling as we no longer have a scan baseline.
-            if self.watch_var.get():
-                self.watch_var.set(False)
-            self._stop_watch()
-            self.watch_check.configure(state="disabled")
-            return
-
-        self.watch_check.configure(state="normal")
-
     def _start_watch(self) -> None:
         self._stop_watch()
         folder = Path(self.folder_var.get()).expanduser()
@@ -323,12 +298,22 @@ class WorkBuddyApp(tk.Tk):
                     continue
             return out
 
-        self._last_watch_snapshot = snapshot()
+        self._last_watch_snapshot = FolderWatcher.snapshot(
+            folder,
+            recursive=recursive,
+            include_hidden=include_hidden,
+            scanner=self._scanner,
+        )
         self.status_var.set("Watch mode enabled (polling).")
 
         def tick() -> None:
             try:
-                current = snapshot()
+                current = FolderWatcher.snapshot(
+                    folder,
+                    recursive=recursive,
+                    include_hidden=include_hidden,
+                    scanner=self._scanner,
+                )
                 added = set(current.keys()) - set(self._last_watch_snapshot.keys())
                 removed = set(self._last_watch_snapshot.keys()) - set(current.keys())
                 changed = {k for k, v in current.items() if self._last_watch_snapshot.get(k) != v}
@@ -554,7 +539,6 @@ class WorkBuddyApp(tk.Tk):
 
     def _on_scan_error(self, message: str) -> None:
         self._set_busy(False, "Ready.")
-        self._set_watch_enabled(enabled=bool(self._latest_result))
         messagebox.showerror("Scan failed", message)
 
     def _on_scan_complete(self, result: ScanResult, elapsed: float) -> None:
@@ -562,15 +546,14 @@ class WorkBuddyApp(tk.Tk):
         self._latest_scan_id = None
         self._current_filter = (self.filter_var.get() or "").strip()
 
-        self._set_watch_enabled(enabled=True)
         self._populate_table(result)
         self._render_charts(result)
         self._update_summary(result, elapsed)
         self._set_busy(False, f"Scan complete in {elapsed:.2f}s.")
 
     def _update_summary(self, result: ScanResult, elapsed: float) -> None:
-        top_categories = self._group_counts(result, key="category")[:4]
-        top_exts = self._group_counts(result, key="ext")[:4]
+        top_categories = ScanAnalyzer.group_counts(result, key="category")[:4]
+        top_exts = ScanAnalyzer.group_counts(result, key="ext")[:4]
 
         cat_str = ", ".join([f"{k} ({v})" for k, v in top_categories]) or "n/a"
         ext_str = ", ".join([f"{k or '[none]'} ({v})" for k, v in top_exts]) or "n/a"
@@ -672,13 +655,11 @@ class WorkBuddyApp(tk.Tk):
         folder_key = self._latest_result.folder
 
         # Largest + oldest lists (using already-collected metadata)
-        largest = sorted(records, key=lambda r: r.size_bytes, reverse=True)[:25]
-        oldest = sorted(records, key=lambda r: r.modified_iso)[:25]
+        largest = ScanAnalyzer.largest_files(self._latest_result, limit=25)
+        oldest = ScanAnalyzer.oldest_files(self._latest_result, limit=25)
 
         # Size by category (bytes)
-        cat_sizes: Dict[str, int] = {}
-        for r in records:
-            cat_sizes[r.category] = cat_sizes.get(r.category, 0) + int(r.size_bytes)
+        cat_sizes = ScanAnalyzer.category_sizes(self._latest_result)
         top_cat_sizes = sorted(cat_sizes.items(), key=lambda kv: -kv[1])[:10]
 
         # Trend from SQLite history (total size over time)
@@ -687,20 +668,8 @@ class WorkBuddyApp(tk.Tk):
         trend_x = [h[1] for h in history]
         trend_y = [h[3] for h in history]
 
-        # Empty folder detection (filesystem walk)
-        empty_dirs: List[Path] = []
-        try:
-            for p in base.rglob("*"):
-                if not p.is_dir():
-                    continue
-                try:
-                    if any(p.iterdir()):
-                        continue
-                    empty_dirs.append(p)
-                except Exception:
-                    continue
-        except Exception:
-            empty_dirs = []
+        # Empty folder detection
+        empty_dirs = FolderInsights.find_empty_dirs(base)
 
         win = tk.Toplevel(self)
         win.title("Insights / Cleanup")
@@ -1093,21 +1062,6 @@ class WorkBuddyApp(tk.Tk):
 
         ttk.Button(top, text="Restore selected…", command=restore_selected).pack(side="right")
 
-    def _group_counts(self, result: ScanResult, *, key: str) -> List[Tuple[str, int]]:
-        if not result.records:
-            return []
-        if key == "category":
-            items = [r.category for r in result.records]
-        elif key == "ext":
-            items = [r.ext or "" for r in result.records]
-        else:
-            raise ValueError("Unknown key")
-
-        counts: Dict[str, int] = {}
-        for it in items:
-            counts[it] = counts.get(it, 0) + 1
-        return sorted(counts.items(), key=lambda kv: (-kv[1], kv[0].lower()))
-
     def _render_empty_charts(self) -> None:
         self.ax1.clear()
         self.ax2.clear()
@@ -1121,8 +1075,8 @@ class WorkBuddyApp(tk.Tk):
         self.ax1.clear()
         self.ax2.clear()
 
-        cats = self._group_counts(result, key="category")
-        exts = self._group_counts(result, key="ext")[:10]
+        cats = ScanAnalyzer.group_counts(result, key="category")
+        exts = ScanAnalyzer.group_counts(result, key="ext")[:10]
 
         if cats:
             labels = [c[0] for c in cats[:8]]
