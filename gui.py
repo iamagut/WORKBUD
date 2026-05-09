@@ -151,10 +151,17 @@ class WorkBuddyApp(tk.Tk):
         ttk.Button(auto, text="Apply schedule", command=self._apply_schedule).grid(row=0, column=3, padx=(10, 0), sticky="w")
 
         self.watch_var = tk.BooleanVar(value=False)
-        ttk.Checkbutton(auto, text="Watch mode (detect changes)", variable=self.watch_var, command=self._toggle_watch).grid(
+        self.watch_check = ttk.Checkbutton(
+            auto,
+            text="Watch mode (detect changes)",
+            variable=self.watch_var,
+            command=self._toggle_watch,
+        )
+        self.watch_check.grid(
             row=0, column=4, padx=(18, 0), sticky="w"
         )
         ttk.Label(auto, text="(lightweight polling)", foreground="#555").grid(row=0, column=5, padx=(6, 0), sticky="w")
+        self._sync_watch_availability()
 
         table_frame = ttk.LabelFrame(left, text="Files (top 500 shown)", padding=10)
         table_frame.grid(row=3, column=0, sticky="nsew")
@@ -509,10 +516,25 @@ class WorkBuddyApp(tk.Tk):
         folder = filedialog.askdirectory(initialdir=self.folder_var.get() or str(Path.home()))
         if folder:
             self.folder_var.set(folder)
+            self._sync_watch_availability()
 
     def _set_busy(self, busy: bool, message: str) -> None:
         self.scan_btn.configure(state=("disabled" if busy else "normal"))
         self.status_var.set(message)
+
+    def _has_active_scan(self) -> bool:
+        if not self._latest_result:
+            return False
+        current_folder = os.path.normcase(str(Path(self.folder_var.get()).expanduser()))
+        latest_folder = os.path.normcase(str(Path(self._latest_result.folder).expanduser()))
+        return current_folder == latest_folder
+
+    def _sync_watch_availability(self) -> None:
+        active_scan = self._has_active_scan()
+        self.watch_check.configure(state=("normal" if active_scan else "disabled"))
+        if not active_scan:
+            self.watch_var.set(False)
+            self._stop_watch()
 
     def _start_scan(self) -> None:
         if self._scan_thread and self._scan_thread.is_alive():
@@ -539,6 +561,7 @@ class WorkBuddyApp(tk.Tk):
 
     def _on_scan_error(self, message: str) -> None:
         self._set_busy(False, "Ready.")
+        self._sync_watch_availability()
         messagebox.showerror("Scan failed", message)
 
     def _on_scan_complete(self, result: ScanResult, elapsed: float) -> None:
@@ -550,6 +573,7 @@ class WorkBuddyApp(tk.Tk):
         self._render_charts(result)
         self._update_summary(result, elapsed)
         self._set_busy(False, f"Scan complete in {elapsed:.2f}s.")
+        self._sync_watch_availability()
 
     def _update_summary(self, result: ScanResult, elapsed: float) -> None:
         top_categories = ScanAnalyzer.group_counts(result, key="category")[:4]
